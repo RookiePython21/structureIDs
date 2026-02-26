@@ -31,6 +31,7 @@ Usage:
 """
 
 import os
+import re
 import sys
 import json
 import math
@@ -226,6 +227,45 @@ def assign_annotation_to_patch(ann_bbox, px1, py1, px2, py2):
 
 
 # ---------------------------------------------------------------------------
+# Filename normalisation (handles spaces / special chars from CVAT export)
+# ---------------------------------------------------------------------------
+def _normalize(name: str) -> str:
+    """
+    Normalize a filename for fuzzy matching.
+    'C-101 (1)_001.png' and 'C-101_1_001.png' both become 'c-101_1_001.png'.
+    """
+    stem, ext = os.path.splitext(name)
+    stem = stem.replace(" ", "_")           # spaces → underscores
+    stem = re.sub(r"[^\w\-]", "_", stem)    # special chars → underscores
+    stem = re.sub(r"_+", "_", stem)         # collapse runs of underscores
+    stem = stem.strip("_")
+    return (stem + ext).lower()
+
+
+def build_filename_lookup(images_dir: Path) -> dict:
+    """
+    Build a dict mapping normalized name → actual Path for every file in images_dir.
+    Lets us match XML filenames (with spaces) to Drive filenames (with underscores).
+    """
+    lookup = {}
+    for p in images_dir.iterdir():
+        if p.is_file():
+            lookup[_normalize(p.name)] = p
+    return lookup
+
+
+def resolve_image_path(xml_name: str, images_dir: Path, lookup: dict):
+    """
+    Return the actual Path for xml_name, or None if not found.
+    Tries exact match first, then normalized match.
+    """
+    exact = images_dir / xml_name
+    if exact.exists():
+        return exact
+    return lookup.get(_normalize(xml_name))
+
+
+# ---------------------------------------------------------------------------
 # Main processing pipeline
 # ---------------------------------------------------------------------------
 def process_dataset(
@@ -248,6 +288,10 @@ def process_dataset(
     ann_out_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- Parse XML --------------------------------------------------------
+    # Build normalized filename lookup once (handles spaces / special chars)
+    filename_lookup = build_filename_lookup(images_dir)
+    print(f"Found {len(filename_lookup)} image files in {images_dir}")
+
     print("Parsing CVAT XML...")
     images = parse_cvat_xml(annotations_xml)
     print(f"  Found {len(images)} images")
@@ -286,9 +330,9 @@ def process_dataset(
         print(f"\nProcessing '{split_name}' split...")
 
         for img_info in split_images:
-            img_path = images_dir / img_info["name"]
-            if not img_path.exists():
-                print(f"  WARNING: Not found — {img_path}")
+            img_path = resolve_image_path(img_info["name"], images_dir, filename_lookup)
+            if img_path is None:
+                print(f"  WARNING: Not found — {img_info['name']}")
                 skipped_images += 1
                 continue
 
