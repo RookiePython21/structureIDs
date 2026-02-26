@@ -1,0 +1,28 @@
+# FS-Symbol — Civil Engineering Structure Detection
+# Python 3.8+ required
+
+# Core deep learning
+torch>=1.10.0
+torchvision>=0.11.0
+
+# Detectron2 — install separately (version must match your CUDA/PyTorch)
+# See: https://detectron2.readthedocs.io/en/latest/tutorials/install.html
+# Colab install:
+#   !pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# Local install (example for torch 1.13 + CUDA 11.6):
+#   pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu116/torch1.13/index.html
+
+# Image processing
+opencv-python>=4.5.0
+numpy>=1.21.0
+
+# XML parsing (CVAT annotations)
+lxml>=4.9.0
+
+# COCO evaluation metrics
+pycocotools>=2.0.4
+
+# Utilities
+Pillow>=9.0.0
+tqdm>=4.62.0
+matplotlib>=3.4.0

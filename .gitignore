@@ -1,0 +1,60 @@
+# FS-Symbol — gitignore
+
+# Source images — too large for GitHub (500MB+), keep on Drive
+annotations/images/
+
+# Generated data (large files)
+data/patches/
+data/support_sets/*/images/
+
+# Keep annotation JSONs (small, needed for reproducibility)
+!data/annotations/*.json
+!data/support_sets/*/support.json
+!data/support_sets/*/summary.json
+!data/dataset_config.json
+
+# Model checkpoints (large)
+checkpoints/
+*.pth
+*.pkl
+
+# Evaluation results (regeneratable)
+results/
+*.json.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment
+.env
+.venv
+venv/
+env/
+
+# Logs
+*.log
+wandb/
+runs/
