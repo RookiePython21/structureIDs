@@ -35,7 +35,8 @@ structureIDs/
 │   └── images/                ← 45 high-res PNGs (~538MB) — stored on Google Drive only
 ├── scripts/
 │   ├── preprocess.py          ← Step 1: CVAT XML → COCO patch dataset
-│   ├── generate_support_sets.py  ← Step 2: K-shot support sets
+│   ├── augment.py             ← Step 2: Offline synthetic data augmentation
+│   ├── generate_support_sets.py  ← Step 3: K-shot support sets
 │   └── visualize.py           ← Verification helper
 ├── model/
 │   └── fs_symbol.py           ← CosineSimLinear + Stage 2 helpers
@@ -99,7 +100,7 @@ import torch
 print(f'PyTorch {torch.__version__}, CUDA {torch.version.cuda}')
 
 !pip install 'git+https://github.com/facebookresearch/detectron2.git' -q
-!pip install lxml pycocotools opencv-python -q
+!pip install lxml pycocotools opencv-python scipy -q
 
 print('Done. Restart runtime if prompted.')
 ```
@@ -145,12 +146,74 @@ structureIDs/data/
 
 ---
 
-### Step 4 — Verify patches visually
+### Step 4 — Augment training patches (synthetic data)
+
+Run once (~10–30 minutes depending on aug_factor). Saves to Drive alongside originals.
 
 ```python
-# Print annotation counts per class
+!pip install scipy -q   # needed for elastic distortion; already installed if Step 2 ran
+
+!python scripts/augment.py \
+    --patches_dir      /content/drive/MyDrive/structureIDs/data/patches/train \
+    --ann_json         /content/drive/MyDrive/structureIDs/data/annotations/train.json \
+    --output_dir       /content/drive/MyDrive/structureIDs/data/patches/train_aug \
+    --out_json         /content/drive/MyDrive/structureIDs/data/annotations/train_aug.json \
+    --aug_factor       3 \
+    --copy_paste_factor 5 \
+    --seed             42 \
+    --merge_json       /content/drive/MyDrive/structureIDs/data/annotations/train_combined.json
+```
+
+**What each flag does:**
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--aug_factor` | 3 | Standard augmented copies per original patch (flip, rotate, zoom, photometric, elastic) |
+| `--copy_paste_factor` | 5 | Extra copy-paste copies; patches with `rip_rap` get the full count, others ~1–2 |
+| `--merge_json` | None | If set, writes a single JSON combining originals + augmented — use this for Stage 1 |
+
+**Augmentations applied:**
+
+| Type | Techniques |
+|---|---|
+| Geometric | H-flip, V-flip, 90°/180°/270° rotation, zoom (crop + resize) |
+| Photometric | Brightness/contrast jitter, Gaussian blur, salt-and-pepper noise |
+| Structural | Elastic distortion (paper-warp simulation, requires scipy) |
+| Copy-paste | Paste symbol crops from the library at random locations; boosts rare classes (`rip_rap`) |
+
+**Expected output:**
+```
+Augmented dataset:
+  Images      : ~60,000–90,000
+  Annotations : ~80,000–120,000
+  Per-class breakdown:
+    square_structure          ...
+    circle_structure          ...
+    headwall                  ...
+    rip_rap                   ...   ← boosted heavily by copy-paste
+```
+
+Additional files on Drive:
+```
+structureIDs/data/
+├── patches/train_aug/             ← augmented patch images
+├── annotations/
+│   ├── train_aug.json             ← augmented set only
+│   └── train_combined.json        ← original + augmented (use this for training)
+```
+
+> **`rip_rap` has only 33 original instances.** Copy-paste augmentation is the primary tool
+> for multiplying these. The `--copy_paste_factor 5` default gives ~5× more synthetic `rip_rap`
+> patches from patches that already contained one, plus pasting crops into other patches.
+
+---
+
+### Step 5 — Verify patches visually
+
+```python
+# Print annotation counts per class (use train_combined.json if you ran Step 4)
 !python scripts/visualize.py \
-    --coco_json /content/drive/MyDrive/structureIDs/data/annotations/train.json \
+    --coco_json /content/drive/MyDrive/structureIDs/data/annotations/train_combined.json \
     --stats
 
 # Save 5 random annotated patches as images
@@ -169,7 +232,7 @@ Image(imgs[0])
 
 ---
 
-### Step 5 — Generate K-shot support sets
+### Step 6 — Generate K-shot support sets
 
 Quick step (~1 minute):
 
@@ -184,9 +247,12 @@ Quick step (~1 minute):
 
 ---
 
-### Step 6 — Stage 1: Base training
+### Step 7 — Stage 1: Base training
 
 Trains the full model on base classes (~2–4 hours on Colab T4). Checkpoints save to Drive every 2,000 iterations.
+
+> **Use `train_combined.json`** (original + augmented) as your training data if you ran Step 4.
+> If you skipped augmentation, `train_base.json` is used by default.
 
 ```python
 !python train_base.py \
@@ -199,7 +265,7 @@ Trains the full model on base classes (~2–4 hours on Colab T4). Checkpoints sa
 
 ---
 
-### Step 7 — Stage 2: Few-shot fine-tuning
+### Step 8 — Stage 2: Few-shot fine-tuning
 
 ~15–30 minutes per K value:
 
@@ -223,7 +289,7 @@ Saves: `checkpoints/fs_symbol_K1.pth`, `fs_symbol_K2.pth`, ..., `fs_symbol_K9.pt
 
 ---
 
-### Step 8 — Evaluate
+### Step 9 — Evaluate
 
 ```python
 # Evaluate all K models and print a comparison table
@@ -313,6 +379,8 @@ Then in Colab pull the latest before training:
 | `CUDA out of memory` | Add `--opts SOLVER.IMS_PER_BATCH 2` to reduce batch size |
 | `WARNING: Not found — some_image.png` | 2 images are missing from the dataset — expected, they are skipped |
 | Support set has fewer than K instances | `rip_rap` has only 33 examples total. Script uses all available with a warning |
+| `Elastic: disabled` in augment output | `scipy` not installed — run `pip install scipy` then re-run Step 4 |
+| Augmented patches look wrong / bboxes off | Re-run `scripts/visualize.py` on `train_aug.json` to spot-check a few patches |
 
 ---
 
@@ -329,4 +397,5 @@ Then in Colab pull the latest before training:
 | Warmup | 500 iters | 200 iters |
 | Batch size | 8 (2 on Colab) | 4 (2 on Colab) |
 | Multiscale training | Yes (480–800px) | No (640px fixed) |
-| Flip augmentation | None | None |
+| Flip augmentation (online) | None | None |
+| Offline augmentation | H/V flip, rot90×3, zoom, brightness/contrast, blur, noise, elastic, copy-paste (Step 4) | — |

@@ -124,7 +124,7 @@ def replace_classifier_with_cosine(model: nn.Module, scale: float = 20.0) -> nn.
     in_features  = old_cls.in_features
     num_classes  = old_cls.out_features  # includes background
 
-    new_cls = CosineSimLinear(in_features, num_classes, scale)
+    new_cls = CosineSimLinear(in_features, num_classes, scale).to(old_cls.weight.device)
     box_predictor.cls_score = new_cls
 
     print(
